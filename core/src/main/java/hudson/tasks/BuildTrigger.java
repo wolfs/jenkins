@@ -24,6 +24,8 @@
 package hudson.tasks;
 
 import hudson.Extension;
+import hudson.ExtensionList;
+import hudson.ExtensionPoint;
 import hudson.Launcher;
 import hudson.Util;
 import hudson.model.AbstractBuild;
@@ -35,7 +37,6 @@ import hudson.model.Cause.UpstreamCause;
 import hudson.model.DependecyDeclarer;
 import hudson.model.DependencyGraph;
 import hudson.model.DependencyGraph.Dependency;
-import jenkins.model.Jenkins;
 import hudson.model.Item;
 import hudson.model.ItemGroup;
 import hudson.model.Items;
@@ -45,9 +46,9 @@ import hudson.model.Result;
 import hudson.model.Run;
 import hudson.model.TaskListener;
 import hudson.model.listeners.ItemListener;
-import hudson.security.AccessControlled;
 import hudson.tasks.BuildTrigger.DescriptorImpl.ItemListenerImpl;
 import hudson.util.FormValidation;
+import jenkins.model.Jenkins;
 import net.sf.json.JSONObject;
 import org.apache.commons.lang.StringUtils;
 import org.kohsuke.stapler.AncestorInPath;
@@ -202,6 +203,8 @@ public class BuildTrigger extends Recorder implements DependecyDeclarer {
             }
         });
 
+        ExtensionList<DependencyTriggerListener> dependencyTriggerListeners = DependencyTriggerListener.all();
+
         for (Dependency dep : downstreamProjects) {
             AbstractProject p = dep.getDownstreamProject();
             if (p.isDisabled()) {
@@ -209,7 +212,11 @@ public class BuildTrigger extends Recorder implements DependecyDeclarer {
                 continue;
             }
             List<Action> buildActions = new ArrayList<Action>();
-            if (dep.shouldTriggerBuild(build, listener, buildActions)) {
+            boolean shouldTrigger = dep.shouldTriggerBuild(build, listener, buildActions);
+            for (DependencyTriggerListener triggerListener : dependencyTriggerListeners) {
+                triggerListener.dependencyChecked(build,dep,shouldTrigger,listener);
+            }
+            if (shouldTrigger) {
                 // this is not completely accurate, as a new build might be triggered
                 // between these calls
                 String name = p.getName()+" #"+p.getNextBuildNumber();
@@ -281,6 +288,14 @@ public class BuildTrigger extends Recorder implements DependecyDeclarer {
         if(childProjects==null)
             return childProjects="";
         return this;
+    }
+
+    public abstract static class DependencyTriggerListener implements ExtensionPoint {
+        public abstract void dependencyChecked(AbstractBuild<?, ?> build, Dependency dependency, boolean shouldTrigger, TaskListener listener);
+
+        public static ExtensionList<DependencyTriggerListener> all() {
+            return Jenkins.getInstance().getExtensionList(DependencyTriggerListener.class);
+        }
     }
 
     @Extension
